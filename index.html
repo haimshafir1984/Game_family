@@ -3,10 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>משחק הקלפים המשפחתי - בלייב</title>
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <title>משחק הקלפים המשפחתי בלייב</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         :root {
             --primary: #6c5ce7;
@@ -40,7 +38,6 @@
         h1 {
             color: var(--primary);
             margin-bottom: 10px;
-            font-size: 1.8rem;
         }
 
         .card {
@@ -91,60 +88,37 @@
             font-weight: bold;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             margin: 6px 4px;
-            transition: transform 0.1s;
         }
 
         button:active {
             transform: scale(0.96);
         }
 
-        .btn-success {
-            background-color: var(--success);
-        }
+        .btn-success { background-color: var(--success); }
+        .btn-accent { background-color: var(--accent); }
 
-        .btn-accent {
-            background-color: var(--accent);
-        }
-
-        /* כרטיסי משתתפים */
         .players-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
             gap: 10px;
             margin: 15px 0;
         }
 
         .player-card {
             background: white;
-            padding: 12px;
-            border-radius: 15px;
+            padding: 10px;
+            border-radius: 12px;
             border: 2px solid #e2e8f0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            position: relative;
         }
 
-        .player-card.active-turn {
+        .player-card.active {
             border-color: var(--primary);
             background-color: #f0edff;
-            box-shadow: 0 0 10px rgba(108, 92, 231, 0.3);
         }
 
-        .player-name {
-            font-weight: bold;
-            font-size: 1rem;
-        }
-
-        .player-score {
-            font-size: 0.9rem;
-            color: #636e72;
-            margin-top: 4px;
-        }
-
-        .hidden {
-            display: none !important;
-        }
+        .player-name { font-weight: bold; }
+        .player-score { font-size: 0.85rem; color: #636e72; margin-top: 4px; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
@@ -152,30 +126,29 @@
 <div class="container">
     <h1>🎲 המשחק המשפחתי בלייב</h1>
 
-    <!-- מסך כניסה וחדר -->
+    <!-- מסך כניסה -->
     <div id="login-screen">
         <h3>התחברות למשחק</h3>
-        <input type="text" id="room-input" placeholder="קוד חדר (למשל: 1234)">
+        <input type="text" id="room-input" placeholder="קוד חדר (באנגלית/מספרים)">
         <input type="text" id="name-input" placeholder="השם שלך">
         <br>
-        <button onclick="joinGame()">הכנס למשחק</button>
+        <button onclick="initGame(true)">פתח חדר חדש (מנהל)</button>
+        <button class="btn-accent" onclick="initGame(false)">התחבר לחדר קיים</button>
     </div>
 
     <!-- מסך המשחק -->
     <div id="game-screen" class="hidden">
         <div>קוד חדר: <b id="display-room"></b></div>
+        <div id="status" style="font-size:0.85rem; color:#888; margin-top:4px;">מתווסף לחדר...</div>
         
-        <!-- כרטיסי משתתפים -->
-        <h3>👥 משתתפים וניקוד:</h3>
+        <h3>👥 משתתפים:</h3>
         <div class="players-grid" id="players-list"></div>
 
-        <!-- קלף המשימה -->
         <div class="card" id="main-card">
-            <div class="card-target" id="card-target">ממתינים להתחלת המשחק...</div>
-            <div class="card-text" id="card-text">לחצו על "הרם קלף" כדי להתחיל!</div>
+            <div class="card-target" id="card-target">ממתינים לשחקנים...</div>
+            <div class="card-text" id="card-text">לחצו "הרם קלף" כשיש לפחות 2 שחקנים בחדר.</div>
         </div>
 
-        <!-- כפתורי פעולה -->
         <div id="controls">
             <button class="btn-accent" onclick="drawCard()">🃏 הרם קלף חדש</button>
             <div id="verify-area" class="hidden" style="margin-top: 10px;">
@@ -186,22 +159,17 @@
 </div>
 
 <script>
-    // הגדרת Firebase (מסד נתונים ציבורי חינמי)
-    const firebaseConfig = {
-        databaseURL: "https://family-game-default-rtdb.europe-west1.firebasedatabase.app/"
-    };
-    
-    // במידה והשרת הציבורי אינו זמין, משתמשים בגיבוי
-    try {
-        firebase.initializeApp(firebaseConfig);
-    } catch(e) {
-        console.log("Firebase init");
-    }
-    const db = firebase.database();
-
-    let roomCode = "";
+    let peer = null;
+    let connections = [];
+    let hostConn = null;
+    let isHost = false;
     let myName = "";
-    let currentGameState = {};
+    let roomCode = "";
+
+    let gameState = {
+        players: {}, // { name: { score: 0 } }
+        card: null
+    };
 
     const questions = [
         "אם היית יכול להחליף תפקידים עם {target} ליום אחד, מה הדבר הראשון שהיית עושה?",
@@ -221,8 +189,9 @@
         "תן כיף באוויר (High Five) מיוחד ל-{target}!"
     ];
 
-    function joinGame() {
-        roomCode = document.getElementById('room-input').value.trim();
+    function initGame(hostFlag) {
+        isHost = hostFlag;
+        roomCode = document.getElementById('room-input').value.trim().toLowerCase();
         myName = document.getElementById('name-input').value.trim();
 
         if (!roomCode || !myName) {
@@ -234,49 +203,86 @@
         document.getElementById('game-screen').classList.remove('hidden');
         document.getElementById('display-room').innerText = roomCode;
 
-        // רישום השחקן בחדר
-        const playerRef = db.ref(`rooms/${roomCode}/players/${myName}`);
-        playerRef.set({
-            name: myName,
-            score: 0
-        });
+        if (isHost) {
+            // מנהל המשחק יוצר Peer לפי קוד החדר
+            peer = new Peer('fam-game-' + roomCode);
+            peer.on('open', () => {
+                document.getElementById('status').innerText = "מחובר כמנהל החדר ✅";
+                gameState.players[myName] = { score: 0 };
+                broadcastState();
+            });
 
-        // האזנה לשינויים בזמן אמת בחדר
-        db.ref(`rooms/${roomCode}`).on('value', (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                currentGameState = data;
-                updateUI(data);
+            peer.on('connection', (conn) => {
+                connections.push(conn);
+                conn.on('data', (data) => handleData(data, conn));
+            });
+
+            peer.on('error', (err) => {
+                alert("קוד חדר זה תפוס או שקיימת שגיאה. נסה קוד אחר.");
+            });
+        } else {
+            // משתתף רגיל מתחבר למנהל
+            peer = new Peer();
+            peer.on('open', () => {
+                document.getElementById('status').innerText = "מתחבר למנהל...";
+                hostConn = peer.connect('fam-game-' + roomCode);
+                
+                hostConn.on('open', () => {
+                    document.getElementById('status').innerText = "מחובר לחדר ✅";
+                    hostConn.send({ type: 'JOIN', name: myName });
+                });
+
+                hostConn.on('data', (data) => handleData(data));
+            });
+        }
+    }
+
+    function handleData(data, conn = null) {
+        if (isHost) {
+            if (data.type === 'JOIN') {
+                gameState.players[data.name] = { score: 0 };
+                broadcastState();
+            } else if (data.type === 'DRAW') {
+                processDrawCard();
+            } else if (data.type === 'APPROVE') {
+                processApprove();
             }
+        } else {
+            if (data.type === 'STATE') {
+                gameState = data.state;
+                renderUI();
+            }
+        }
+    }
+
+    function broadcastState() {
+        renderUI();
+        connections.forEach(c => {
+            if (c.open) c.send({ type: 'STATE', state: gameState });
         });
     }
 
-    function updateUI(data) {
-        // עדכון כרטיסי שחקנים
-        const playersList = document.getElementById('players-list');
-        playersList.innerHTML = '';
+    function renderUI() {
+        const list = document.getElementById('players-list');
+        list.innerHTML = '';
+        
+        Object.keys(gameState.players).forEach(pName => {
+            const p = gameState.players[pName];
+            const isTurn = gameState.card && gameState.card.activePlayer === pName;
+            list.innerHTML += `
+                <div class="player-card ${isTurn ? 'active' : ''}">
+                    <div class="player-name">${pName} ${isTurn ? '⭐' : ''}</div>
+                    <div class="player-score">🏆 ${p.score} נק'</div>
+                </div>
+            `;
+        });
 
-        if (data.players) {
-            Object.values(data.players).forEach(p => {
-                const isCurrentTurn = data.currentTurn === p.name;
-                const cardHtml = `
-                    <div class="player-card ${isCurrentTurn ? 'active-turn' : ''}">
-                        <div class="player-name">${p.name} ${isCurrentTurn ? '⭐' : ''}</div>
-                        <div class="player-score">🏆 ${p.score || 0} נקודות</div>
-                    </div>
-                `;
-                playersList.innerHTML += cardHtml;
-            });
-        }
+        if (gameState.card) {
+            document.getElementById('card-target').innerText = `תור: ${gameState.card.activePlayer} ⬅️ מול: ${gameState.card.targetPlayer}`;
+            document.getElementById('card-text').innerHTML = gameState.card.text;
 
-        // עדכון קלף נוכחי
-        if (data.card) {
-            document.getElementById('card-target').innerText = `תור: ${data.card.activePlayer} ⬅️ מול: ${data.card.targetPlayer}`;
-            document.getElementById('card-text').innerHTML = data.card.text;
-
-            // הצגת כפתור וי/אישור רק למי שמיעדים אליו את המשימה
             const verifyArea = document.getElementById('verify-area');
-            if (myName === data.card.targetPlayer && !data.card.approved) {
+            if (myName === gameState.card.targetPlayer && !gameState.card.approved) {
                 verifyArea.classList.remove('hidden');
             } else {
                 verifyArea.classList.add('hidden');
@@ -285,50 +291,56 @@
     }
 
     function drawCard() {
-        if (!currentGameState.players) return;
+        if (isHost) {
+            processDrawCard();
+        } else if (hostConn && hostConn.open) {
+            hostConn.send({ type: 'DRAW' });
+        }
+    }
 
-        const playerNames = Object.keys(currentGameState.players);
-        if (playerNames.length < 2) {
-            alert("צריך לפחות 2 שחקנים בחדר כדי להתחיל!");
+    function processDrawCard() {
+        const pNames = Object.keys(gameState.players);
+        if (pNames.length < 2) {
+            alert("צריך לפחות 2 משתתפים בחדר!");
             return;
         }
 
-        // בחירת שחקן פעיל ושחקן מטרה
-        const activePlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
-        let targetPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+        const activePlayer = pNames[Math.floor(Math.random() * pNames.length)];
+        let targetPlayer = pNames[Math.floor(Math.random() * pNames.length)];
         while (targetPlayer === activePlayer) {
-            targetPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+            targetPlayer = pNames[Math.floor(Math.random() * pNames.length)];
         }
 
-        // בחירת שאלה
         const randomQ = questions[Math.floor(Math.random() * questions.length)];
         const formattedQ = randomQ.replace(/{target}/g, `<b>${targetPlayer}</b>`);
 
-        // עדכון ב-Firebase
-        db.ref(`rooms/${roomCode}/card`).set({
-            activePlayer: activePlayer,
-            targetPlayer: targetPlayer,
+        gameState.card = {
+            activePlayer,
+            targetPlayer,
             text: formattedQ,
             approved: false
-        });
+        };
 
-        db.ref(`rooms/${roomCode}/currentTurn`).set(activePlayer);
+        broadcastState();
     }
 
     function approveTask() {
-        if (!currentGameState.card) return;
+        if (isHost) {
+            processApprove();
+        } else if (hostConn && hostConn.open) {
+            hostConn.send({ type: 'APPROVE' });
+        }
+    }
 
-        const activePlayer = currentGameState.card.activePlayer;
-        const currentScore = (currentGameState.players[activePlayer]?.score || 0) + 1;
-
-        // העלאת ניקוד לשחקן שביצע
-        db.ref(`rooms/${roomCode}/players/${activePlayer}/score`).set(currentScore);
-        // סימון שהמשימה אושרה
-        db.ref(`rooms/${roomCode}/card/approved`).set(true);
-
-        alert(`כל הכבוד! ${activePlayer} קיבל/ה נקודה!`);
+    function processApprove() {
+        if (!gameState.card) return;
+        const active = gameState.card.activePlayer;
+        if (gameState.players[active]) {
+            gameState.players[active].score += 1;
+        }
+        gameState.card.approved = true;
+        broadcastState();
     }
 </script>
 </body>
 </html>
-
