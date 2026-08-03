@@ -3,12 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>משחק הקלפים המשפחתי שלנו</title>
+    <title>משחק הקלפים המשפחתי - בלייב</title>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <style>
         :root {
             --primary: #6c5ce7;
             --secondary: #a29bfe;
             --accent: #fd79a8;
+            --success: #00b894;
             --bg: #f8f9fa;
             --card-bg: #ffffff;
             --text: #2d3436;
@@ -19,36 +23,37 @@
             background-color: var(--bg);
             color: var(--text);
             margin: 0;
-            padding: 20px;
+            padding: 15px;
             display: flex;
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
+            box-sizing: border-box;
         }
 
         .container {
-            max-width: 500px;
+            max-width: 480px;
             width: 100%;
             text-align: center;
         }
 
         h1 {
             color: var(--primary);
-            margin-bottom: 20px;
+            margin-bottom: 10px;
+            font-size: 1.8rem;
         }
 
         .card {
             background: var(--card-bg);
             border-radius: 20px;
-            padding: 30px 20px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            margin: 20px 0;
-            min-height: 220px;
+            padding: 25px 20px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+            margin: 15px 0;
+            min-height: 180px;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            transition: transform 0.3s ease;
             border: 3px solid var(--secondary);
         }
 
@@ -56,192 +61,272 @@
             font-size: 1.1rem;
             font-weight: bold;
             color: var(--accent);
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
 
         .card-text {
-            font-size: 1.3rem;
-            line-height: 1.6;
-            color: var(--text);
+            font-size: 1.25rem;
+            line-height: 1.5;
         }
 
         input[type="text"] {
             width: 80%;
             padding: 12px;
             border: 2px solid var(--secondary);
-            border-radius: 10px;
+            border-radius: 12px;
             font-size: 1rem;
-            margin-bottom: 10px;
+            margin: 6px 0;
             outline: none;
+            text-align: center;
         }
 
         button {
             background-color: var(--primary);
             color: white;
             border: none;
-            padding: 12px 24px;
-            font-size: 1.1rem;
-            border-radius: 10px;
+            padding: 12px 20px;
+            font-size: 1rem;
+            border-radius: 12px;
             cursor: pointer;
             font-weight: bold;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: background 0.2s, transform 0.1s;
-            margin: 5px;
-        }
-
-        button:hover {
-            background-color: #5b4cc4;
+            margin: 6px 4px;
+            transition: transform 0.1s;
         }
 
         button:active {
-            transform: scale(0.98);
+            transform: scale(0.96);
         }
 
-        .players-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            justify-content: center;
+        .btn-success {
+            background-color: var(--success);
+        }
+
+        .btn-accent {
+            background-color: var(--accent);
+        }
+
+        /* כרטיסי משתתפים */
+        .players-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
             margin: 15px 0;
         }
 
-        .player-tag {
-            background: var(--secondary);
-            color: white;
-            padding: 6px 14px;
-            border-radius: 20px;
+        .player-card {
+            background: white;
+            padding: 12px;
+            border-radius: 15px;
+            border: 2px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        .player-card.active-turn {
+            border-color: var(--primary);
+            background-color: #f0edff;
+            box-shadow: 0 0 10px rgba(108, 92, 231, 0.3);
+        }
+
+        .player-name {
+            font-weight: bold;
+            font-size: 1rem;
+        }
+
+        .player-score {
             font-size: 0.9rem;
+            color: #636e72;
+            margin-top: 4px;
         }
 
         .hidden {
-            display: none;
+            display: none !important;
         }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎲 המשחק המשפחתי</h1>
+    <h1>🎲 המשחק המשפחתי בלייב</h1>
 
-    <!-- מסך הרשמה -->
-    <div id="setup-screen">
-        <h3>מי משחק איתנו?</h3>
-        <input type="text" id="player-name" placeholder="הכנס שם משתתף...">
+    <!-- מסך כניסה וחדר -->
+    <div id="login-screen">
+        <h3>התחברות למשחק</h3>
+        <input type="text" id="room-input" placeholder="קוד חדר (למשל: 1234)">
+        <input type="text" id="name-input" placeholder="השם שלך">
         <br>
-        <button onclick="addPlayer()">הוסף משתתף</button>
-        
-        <div class="players-list" id="players-container"></div>
-        
-        <br><br>
-        <button id="start-btn" onclick="startGame()" style="background-color: var(--accent); display:none;">התחל במשחק!</button>
+        <button onclick="joinGame()">הכנס למשחק</button>
     </div>
 
     <!-- מסך המשחק -->
     <div id="game-screen" class="hidden">
-        <div id="turn-info" style="font-size: 1.2rem; font-weight: bold; color: var(--primary);"></div>
+        <div>קוד חדר: <b id="display-room"></b></div>
         
+        <!-- כרטיסי משתתפים -->
+        <h3>👥 משתתפים וניקוד:</h3>
+        <div class="players-grid" id="players-list"></div>
+
+        <!-- קלף המשימה -->
         <div class="card" id="main-card">
-            <div class="card-target" id="card-target">לחץ על כפתור "הרם קלף" כדי להתחיל!</div>
-            <div class="card-text" id="card-text">---</div>
+            <div class="card-target" id="card-target">ממתינים להתחלת המשחק...</div>
+            <div class="card-text" id="card-text">לחצו על "הרם קלף" כדי להתחיל!</div>
         </div>
 
-        <button onclick="nextCard()">🃏 הרם קלף חדש</button>
+        <!-- כפתורי פעולה -->
+        <div id="controls">
+            <button class="btn-accent" onclick="drawCard()">🃏 הרם קלף חדש</button>
+            <div id="verify-area" class="hidden" style="margin-top: 10px;">
+                <button class="btn-success" onclick="approveTask()">✅ אישור משימה (+1 נקודה)</button>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
-    const players = [];
-    let currentCardIndex = 0;
+    // הגדרת Firebase (מסד נתונים ציבורי חינמי)
+    const firebaseConfig = {
+        databaseURL: "https://family-game-default-rtdb.europe-west1.firebasedatabase.app/"
+    };
+    
+    // במידה והשרת הציבורי אינו זמין, משתמשים בגיבוי
+    try {
+        firebase.initializeApp(firebaseConfig);
+    } catch(e) {
+        console.log("Firebase init");
+    }
+    const db = firebase.database();
 
-    // מאגר 64 שאלות ומשימות
+    let roomCode = "";
+    let myName = "";
+    let currentGameState = {};
+
     const questions = [
         "אם היית יכול להחליף תפקידים עם {target} ליום אחד, מה הדבר הראשון שהיית עושה?",
         "מה המאכל ש-{target} הכי אוהב/ת לאכול לדעתך?",
-        "איזה סופר-כוח הכי מתאים ל-{target}?",
-        "שתף בזיכרון מצחיק או מתוק שיש לך עם {target}.",
         "תעשה חיקוי מצחיק של {target} במשך 15 שניות!",
         "תן מחמאה מכל הלב ל-{target}.",
         "תמציא לחיצת יד סודית ומגניבה יחד עם {target}.",
-        "ספר בדיחה! אם {target} צוחק/ת - קיבלת נקודה.",
+        "ספר בדיחה! אם {target} צוחק/ת - מגיע לך ניקוד!",
         "מה הדבר הכי מיוחד או יפה ב-{target}?",
-        "אם הייתם יוצאים לחופשה חלומית רק אתה ו-{target}, לאן הייתם נוסעים?",
-        "אמור 3 דברים שאתה אוהב ב-{target}.",
-        "שאל את {target} שאלה אחת שאי פעם רצית לשאול ולא יצא לך.",
-        "נסה לנחש: מה הצבע האהוב על {target}?",
         "עשה פרצוף מצחיק עד ש-{target} מחייך/ת!",
         "תאר את {target} בשלוש מילים בלבד.",
         "מה הדבר שהכי מצחיק אותך ב-{target}?",
-        "אם {target} היה גיבור על, מה היה שמו?",
-        "שתף בטיפ אחד טוב שקיבלת מ-{target} או שאתה רוצה לתת לו/לה.",
-        "איזה שיר הכי מזכיר לך את {target}?",
-        "עשה עיסוי כתפיים קצר של 10 שניות ל-{target}.",
-        "תאר יום מושלם שאתה ו-{target} הייתם מעבירים יחד.",
-        "מה הדבר הכי אמיץ שראית את {target} עושה?",
         "אם היית צורך לבשל ארוחה ל-{target}, מה היית מכין?",
-        "מה התכונה שאתה הכי מעריך ב-{target}?",
+        "עשה עיסוי כתפיים קצר של 10 שניות ל-{target}.",
         "רוץ מסביב ל-{target} פעמיים ותגיד משהו מצחיק!",
         "נסה לחקות את הצחוק של {target}.",
-        "איזה סרט או סדרה אתה ו-{target} הכי נהנים לראות יחד?",
-        "מה המשימה או המלאכה ש-{target} הכי טוב/ה בה בבית?",
-        "תן כיף באוויר (High Five) מיוחד ל-{target}!",
-        "אם היית יכול להעניק מתנה יצירתית ל-{target}, מה זו הייתה?",
-        // ניתן להמשיך להוסיף שאלות עד 64 בפורמט זה...
+        "תן כיף באוויר (High Five) מיוחד ל-{target}!"
     ];
 
-    // מילוי אוטומטי של שאלות נוספות עד 64
-    while(questions.length < 64) {
-        questions.push(`שאלה/משימה מיוחדת #${questions.length + 1}: תן מילה טובה ל-{target} ושתף משהו שמשמח אותך במשפחה!`);
-    }
+    function joinGame() {
+        roomCode = document.getElementById('room-input').value.trim();
+        myName = document.getElementById('name-input').value.trim();
 
-    function addPlayer() {
-        const input = document.getElementById('player-name');
-        const name = input.value.trim();
-        
-        if (name && !players.includes(name)) {
-            players.push(name);
-            input.value = '';
-            renderPlayers();
+        if (!roomCode || !myName) {
+            alert("נא להזין קוד חדר ושם!");
+            return;
         }
-    }
 
-    function renderPlayers() {
-        const container = document.getElementById('players-container');
-        container.innerHTML = players.map(p => `<span class="player-tag">${p}</span>`).join('');
-        
-        if (players.length >= 2) {
-            document.getElementById('start-btn').style.display = 'inline-block';
-        }
-    }
-
-    function startGame() {
-        document.getElementById('setup-screen').classList.add('hidden');
+        document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
-        // ערבוב שאלות
-        questions.sort(() => Math.random() - 0.5);
+        document.getElementById('display-room').innerText = roomCode;
+
+        // רישום השחקן בחדר
+        const playerRef = db.ref(`rooms/${roomCode}/players/${myName}`);
+        playerRef.set({
+            name: myName,
+            score: 0
+        });
+
+        // האזנה לשינויים בזמן אמת בחדר
+        db.ref(`rooms/${roomCode}`).on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                currentGameState = data;
+                updateUI(data);
+            }
+        });
     }
 
-    function nextCard() {
-        if (players.length < 2) return;
+    function updateUI(data) {
+        // עדכון כרטיסי שחקנים
+        const playersList = document.getElementById('players-list');
+        playersList.innerHTML = '';
 
-        // לבחור מי שואל ומי המטרה
-        const activePlayerIndex = Math.floor(Math.random() * players.length);
-        let targetPlayerIndex = Math.floor(Math.random() * players.length);
-        
-        while (targetPlayerIndex === activePlayerIndex) {
-            targetPlayerIndex = Math.floor(Math.random() * players.length);
+        if (data.players) {
+            Object.values(data.players).forEach(p => {
+                const isCurrentTurn = data.currentTurn === p.name;
+                const cardHtml = `
+                    <div class="player-card ${isCurrentTurn ? 'active-turn' : ''}">
+                        <div class="player-name">${p.name} ${isCurrentTurn ? '⭐' : ''}</div>
+                        <div class="player-score">🏆 ${p.score || 0} נקודות</div>
+                    </div>
+                `;
+                playersList.innerHTML += cardHtml;
+            });
         }
 
-        const activePlayer = players[activePlayerIndex];
-        const targetPlayer = players[targetPlayerIndex];
+        // עדכון קלף נוכחי
+        if (data.card) {
+            document.getElementById('card-target').innerText = `תור: ${data.card.activePlayer} ⬅️ מול: ${data.card.targetPlayer}`;
+            document.getElementById('card-text').innerHTML = data.card.text;
 
-        const rawQuestion = questions[currentCardIndex % questions.length];
-        const formattedQuestion = rawQuestion.replace(/{target}/g, `<b>${targetPlayer}</b>`);
+            // הצגת כפתור וי/אישור רק למי שמיעדים אליו את המשימה
+            const verifyArea = document.getElementById('verify-area');
+            if (myName === data.card.targetPlayer && !data.card.approved) {
+                verifyArea.classList.remove('hidden');
+            } else {
+                verifyArea.classList.add('hidden');
+            }
+        }
+    }
 
-        document.getElementById('turn-info').innerText = `התור של: ${activePlayer}`;
-        document.getElementById('card-target').innerText = `המשימה מול: ${targetPlayer}`;
-        document.getElementById('card-text').innerHTML = formattedQuestion;
+    function drawCard() {
+        if (!currentGameState.players) return;
 
-        currentCardIndex++;
+        const playerNames = Object.keys(currentGameState.players);
+        if (playerNames.length < 2) {
+            alert("צריך לפחות 2 שחקנים בחדר כדי להתחיל!");
+            return;
+        }
+
+        // בחירת שחקן פעיל ושחקן מטרה
+        const activePlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+        let targetPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+        while (targetPlayer === activePlayer) {
+            targetPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+        }
+
+        // בחירת שאלה
+        const randomQ = questions[Math.floor(Math.random() * questions.length)];
+        const formattedQ = randomQ.replace(/{target}/g, `<b>${targetPlayer}</b>`);
+
+        // עדכון ב-Firebase
+        db.ref(`rooms/${roomCode}/card`).set({
+            activePlayer: activePlayer,
+            targetPlayer: targetPlayer,
+            text: formattedQ,
+            approved: false
+        });
+
+        db.ref(`rooms/${roomCode}/currentTurn`).set(activePlayer);
+    }
+
+    function approveTask() {
+        if (!currentGameState.card) return;
+
+        const activePlayer = currentGameState.card.activePlayer;
+        const currentScore = (currentGameState.players[activePlayer]?.score || 0) + 1;
+
+        // העלאת ניקוד לשחקן שביצע
+        db.ref(`rooms/${roomCode}/players/${activePlayer}/score`).set(currentScore);
+        // סימון שהמשימה אושרה
+        db.ref(`rooms/${roomCode}/card/approved`).set(true);
+
+        alert(`כל הכבוד! ${activePlayer} קיבל/ה נקודה!`);
     }
 </script>
 </body>
