@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>משחק הקלפים המשפחתי בלייב</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         :root {
             --primary: #6c5ce7;
@@ -129,24 +128,22 @@
     <!-- מסך כניסה -->
     <div id="login-screen">
         <h3>התחברות למשחק</h3>
-        <input type="text" id="room-input" placeholder="קוד חדר (באנגלית/מספרים)">
+        <input type="text" id="room-input" placeholder="קוד חדר (למשל: 123)">
         <input type="text" id="name-input" placeholder="השם שלך">
         <br>
-        <button onclick="initGame(true)">פתח חדר חדש (מנהל)</button>
-        <button class="btn-accent" onclick="initGame(false)">התחבר לחדר קיים</button>
+        <button onclick="joinGame()">הכנס למשחק</button>
     </div>
 
     <!-- מסך המשחק -->
     <div id="game-screen" class="hidden">
-        <div>קוד חדר: <b id="display-room"></b></div>
-        <div id="status" style="font-size:0.85rem; color:#888; margin-top:4px;">מתווסף לחדר...</div>
+        <div>קוד חדר: <b id="display-room"></b> | שחקן: <b id="display-my-name" style="color:var(--primary);"></b></div>
         
-        <h3>👥 משתתפים:</h3>
+        <h3>👥 משתתפים וניקוד:</h3>
         <div class="players-grid" id="players-list"></div>
 
         <div class="card" id="main-card">
-            <div class="card-target" id="card-target">ממתינים לשחקנים...</div>
-            <div class="card-text" id="card-text">לחצו "הרם קלף" כשיש לפחות 2 שחקנים בחדר.</div>
+            <div class="card-target" id="card-target">ממתינים לתחילת המשחק...</div>
+            <div class="card-text" id="card-text">לחצו על "הרם קלף" כדי להתחיל!</div>
         </div>
 
         <div id="controls">
@@ -159,17 +156,9 @@
 </div>
 
 <script>
-    let peer = null;
-    let connections = [];
-    let hostConn = null;
-    let isHost = false;
     let myName = "";
     let roomCode = "";
-
-    let gameState = {
-        players: {}, // { name: { score: 0 } }
-        card: null
-    };
+    let channel = null;
 
     const questions = [
         "אם היית יכול להחליף תפקידים עם {target} ליום אחד, מה הדבר הראשון שהיית עושה?",
@@ -182,16 +171,15 @@
         "עשה פרצוף מצחיק עד ש-{target} מחייך/ת!",
         "תאר את {target} בשלוש מילים בלבד.",
         "מה הדבר שהכי מצחיק אותך ב-{target}?",
-        "אם היית צורך לבשל ארוחה ל-{target}, מה היית מכין?",
+        "אם היית צריך לבשל ארוחה ל-{target}, מה היית מכין?",
         "עשה עיסוי כתפיים קצר של 10 שניות ל-{target}.",
         "רוץ מסביב ל-{target} פעמיים ותגיד משהו מצחיק!",
         "נסה לחקות את הצחוק של {target}.",
         "תן כיף באוויר (High Five) מיוחד ל-{target}!"
     ];
 
-    function initGame(hostFlag) {
-        isHost = hostFlag;
-        roomCode = document.getElementById('room-input').value.trim().toLowerCase();
+    function joinGame() {
+        roomCode = document.getElementById('room-input').value.trim();
         myName = document.getElementById('name-input').value.trim();
 
         if (!roomCode || !myName) {
@@ -202,87 +190,71 @@
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
         document.getElementById('display-room').innerText = roomCode;
+        document.getElementById('display-my-name').innerText = myName;
 
-        if (isHost) {
-            // מנהל המשחק יוצר Peer לפי קוד החדר
-            peer = new Peer('fam-game-' + roomCode);
-            peer.on('open', () => {
-                document.getElementById('status').innerText = "מחובר כמנהל החדר ✅";
-                gameState.players[myName] = { score: 0 };
-                broadcastState();
-            });
-
-            peer.on('connection', (conn) => {
-                connections.push(conn);
-                conn.on('data', (data) => handleData(data, conn));
-            });
-
-            peer.on('error', (err) => {
-                alert("קוד חדר זה תפוס או שקיימת שגיאה. נסה קוד אחר.");
-            });
-        } else {
-            // משתתף רגיל מתחבר למנהל
-            peer = new Peer();
-            peer.on('open', () => {
-                document.getElementById('status').innerText = "מתחבר למנהל...";
-                hostConn = peer.connect('fam-game-' + roomCode);
-                
-                hostConn.on('open', () => {
-                    document.getElementById('status').innerText = "מחובר לחדר ✅";
-                    hostConn.send({ type: 'JOIN', name: myName });
-                });
-
-                hostConn.on('data', (data) => handleData(data));
-            });
-        }
-    }
-
-    function handleData(data, conn = null) {
-        if (isHost) {
-            if (data.type === 'JOIN') {
-                gameState.players[data.name] = { score: 0 };
-                broadcastState();
-            } else if (data.type === 'DRAW') {
-                processDrawCard();
-            } else if (data.type === 'APPROVE') {
-                processApprove();
+        // חיבור לערוץ משותף לפי קוד החדר
+        channel = new BroadcastChannel('fam_game_room_' + roomCode);
+        channel.onmessage = (event) => {
+            if (event.data && event.data.type === 'SYNC') {
+                updateUILocally(event.data.state);
             }
-        } else {
-            if (data.type === 'STATE') {
-                gameState = data.state;
-                renderUI();
-            }
+        };
+
+        // בדיקה אם קיים כבר מצב חדר שמור
+        let state = loadState();
+        if (!state.players) state.players = {};
+        
+        // הוספת שחקן חדש או עדכון נוכחות
+        if (!state.players[myName]) {
+            state.players[myName] = { score: 0 };
         }
+
+        saveAndBroadcast(state);
     }
 
-    function broadcastState() {
-        renderUI();
-        connections.forEach(c => {
-            if (c.open) c.send({ type: 'STATE', state: gameState });
-        });
+    function getStorageKey() {
+        return 'fam_game_state_' + roomCode;
     }
 
-    function renderUI() {
+    function loadState() {
+        const data = localStorage.getItem(getStorageKey());
+        return data ? JSON.parse(data) : { players: {}, card: null };
+    }
+
+    function saveAndBroadcast(state) {
+        localStorage.setItem(getStorageKey(), JSON.stringify(state));
+        if (channel) {
+            channel.postMessage({ type: 'SYNC', state: state });
+        }
+        updateUILocally(state);
+    }
+
+    function updateUILocally(state) {
+        // עדכון רשימת השחקנים
         const list = document.getElementById('players-list');
         list.innerHTML = '';
-        
-        Object.keys(gameState.players).forEach(pName => {
-            const p = gameState.players[pName];
-            const isTurn = gameState.card && gameState.card.activePlayer === pName;
-            list.innerHTML += `
-                <div class="player-card ${isTurn ? 'active' : ''}">
-                    <div class="player-name">${pName} ${isTurn ? '⭐' : ''}</div>
-                    <div class="player-score">🏆 ${p.score} נק'</div>
-                </div>
-            `;
-        });
 
-        if (gameState.card) {
-            document.getElementById('card-target').innerText = `תור: ${gameState.card.activePlayer} ⬅️ מול: ${gameState.card.targetPlayer}`;
-            document.getElementById('card-text').innerHTML = gameState.card.text;
+        if (state.players) {
+            Object.keys(state.players).forEach(pName => {
+                const p = state.players[pName];
+                const isTurn = state.card && state.card.activePlayer === pName;
+                list.innerHTML += `
+                    <div class="player-card ${isTurn ? 'active' : ''}">
+                        <div class="player-name">${pName} ${isTurn ? '⭐' : ''}</div>
+                        <div class="player-score">🏆 ${p.score || 0} נק'</div>
+                    </div>
+                `;
+            });
+        }
+
+        // עדכון הקלף
+        if (state.card) {
+            document.getElementById('card-target').innerText = `תור: ${state.card.activePlayer} ⬅️ מול: ${state.card.targetPlayer}`;
+            document.getElementById('card-text').innerHTML = state.card.text;
 
             const verifyArea = document.getElementById('verify-area');
-            if (myName === gameState.card.targetPlayer && !gameState.card.approved) {
+            // אם אני השחקן שאליהם כוונה המשימה והיא טרם אושרה
+            if (myName === state.card.targetPlayer && !state.card.approved) {
                 verifyArea.classList.remove('hidden');
             } else {
                 verifyArea.classList.add('hidden');
@@ -291,17 +263,11 @@
     }
 
     function drawCard() {
-        if (isHost) {
-            processDrawCard();
-        } else if (hostConn && hostConn.open) {
-            hostConn.send({ type: 'DRAW' });
-        }
-    }
-
-    function processDrawCard() {
-        const pNames = Object.keys(gameState.players);
+        let state = loadState();
+        const pNames = Object.keys(state.players);
+        
         if (pNames.length < 2) {
-            alert("צריך לפחות 2 משתתפים בחדר!");
+            alert("צריך לפחות 2 שחקנים שנכנסו לחדר!");
             return;
         }
 
@@ -314,33 +280,37 @@
         const randomQ = questions[Math.floor(Math.random() * questions.length)];
         const formattedQ = randomQ.replace(/{target}/g, `<b>${targetPlayer}</b>`);
 
-        gameState.card = {
-            activePlayer,
-            targetPlayer,
+        state.card = {
+            activePlayer: activePlayer,
+            targetPlayer: targetPlayer,
             text: formattedQ,
             approved: false
         };
 
-        broadcastState();
+        saveAndBroadcast(state);
     }
 
     function approveTask() {
-        if (isHost) {
-            processApprove();
-        } else if (hostConn && hostConn.open) {
-            hostConn.send({ type: 'APPROVE' });
+        let state = loadState();
+        if (!state.card) return;
+
+        const activePlayer = state.card.activePlayer;
+        if (state.players[activePlayer]) {
+            state.players[activePlayer].score = (state.players[activePlayer].score || 0) + 1;
         }
+        state.card.approved = true;
+
+        saveAndBroadcast(state);
+        alert(`כל הכבוד! ${activePlayer} קיבל/ה נקודה! 🏆`);
     }
 
-    function processApprove() {
-        if (!gameState.card) return;
-        const active = gameState.card.activePlayer;
-        if (gameState.players[active]) {
-            gameState.players[active].score += 1;
+    // רענון תקופתי קצר לסנכרון מיטבי בין מכשירים שונים
+    setInterval(() => {
+        if (roomCode) {
+            let state = loadState();
+            updateUILocally(state);
         }
-        gameState.card.approved = true;
-        broadcastState();
-    }
+    }, 1000);
 </script>
 </body>
 </html>
